@@ -1,0 +1,5 @@
+The "Network.Multicast" module is for sending UDP datagrams over multicast
+(class D) addresses.
+
+Please see the two minimal examples in the examples/ directory for how to
+use this library.

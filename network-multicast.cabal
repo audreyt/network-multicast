@@ -1,0 +1,23 @@
+name:               network-multicast
+version:            0.0.3
+copyright:          2008 Audrey Tang
+license:            BSD3
+license-file:       LICENSE
+author:             Audrey Tang <audreyt@audreyt.org>
+maintainer:         Audrey Tang <audreyt@audreyt.org>
+synopsis:           Simple multicast library
+description:        The "Network.Multicast" module is for sending
+                    UDP datagrams over multicast (class D) addresses.
+stability:          experimental
+build-type:         Simple
+category:           Network
+cabal-version:      >= 1.2
+extra-source-files: examples/sender.hs examples/receiver.hs
+
+library
+    extensions:         ForeignFunctionInterface, CPP
+    exposed-modules:    Network.Multicast
+    build-depends:      base, network
+    hs-source-dirs:     src
+    if os(win32)
+        extra-libraries: ws2_32
