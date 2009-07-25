@@ -77,6 +77,8 @@ multicastReceiver host port = do
     sock  <- socket AF_INET Datagram proto
 #ifdef SO_REUSEPORT
     setSocketOption sock ReusePort 1
+#else
+    setSocketOption sock ReuseAddr 1
 #endif
     bindSocket sock $ SockAddrInet port #{const INADDR_ANY}
     addMembership sock host
