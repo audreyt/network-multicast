@@ -82,30 +82,29 @@ multicastReceiver host port = do
     addMembership sock host
     return sock
 
-doSetSocketOption :: Storable a => Socket -> a -> IO CInt
-doSetSocketOption (MkSocket s _ _ _ _) x = alloca $ \ptr -> do
+doSetSocketOption :: Storable a => CInt -> Socket -> a -> IO CInt
+doSetSocketOption ip_multicast_option (MkSocket s _ _ _ _) x = alloca $ \ptr -> do
     poke ptr x
-    c_setsockopt s _IPPROTO_IP _IP_MULTICAST_LOOP (castPtr ptr) (toEnum $ sizeOf x)
+    c_setsockopt s _IPPROTO_IP ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
 
 -- | Enable or disable the loopback mode on a socket created by 'multicastSender'.
 -- Loopback is enabled by default; disabling it may improve performance a little bit.
 setLoopbackMode :: Socket -> LoopbackMode -> IO ()
 setLoopbackMode sock mode = maybeIOError "setLoopbackMode" $ do
     let loop = if mode then 1 else 0 :: CUChar
-    doSetSocketOption sock loop
-    where
+    doSetSocketOption _IP_MULTICAST_LOOP sock loop
 
 -- | Set the Time-to-Live of the multicast.
 setTimeToLive :: Socket -> TimeToLive -> IO ()
 setTimeToLive sock ttl = maybeIOError "setTimeToLive" $ do
     let val = toEnum ttl :: CInt
-    doSetSocketOption sock val
+    doSetSocketOption _IP_MULTICAST_TTL sock val
 
 -- | Set the outgoing interface address of the multicast.
 setInterface :: Socket -> HostName -> IO ()
 setInterface sock host = maybeIOError "setInterface" $ do
     addr <- inet_addr host
-    doSetSocketOption sock addr
+    doSetSocketOption _IP_MULTICAST_IF sock addr
 
 -- | Make the socket listen on multicast datagrams sent by the specified 'HostName'.
 addMembership :: Socket -> HostName -> IO ()
