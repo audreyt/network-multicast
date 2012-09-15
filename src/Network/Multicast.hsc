@@ -80,7 +80,8 @@ multicastReceiver host port = do
 #else
     setSocketOption sock ReuseAddr 1
 #endif
-    bindSocket sock $ SockAddrInet port #{const INADDR_ANY}
+    (addrInfo:_) <- getAddrInfo Nothing (Just host) (Just $ show port)
+    bindSocket sock $ addrAddress addrInfo
     addMembership sock host
     return sock
 

@@ -1,5 +1,5 @@
 name:               network-multicast
-version:            0.0.6
+version:            0.0.7
 copyright:          2008-2012 Audrey Tang
 license:            PublicDomain
 license-file:       LICENSE
@@ -17,7 +17,7 @@ extra-source-files: examples/sender.hs examples/receiver.hs
 library
     extensions:         ForeignFunctionInterface, CPP
     exposed-modules:    Network.Multicast
-    build-depends:      base >= 2 && < 5, network
+    build-depends:      base >= 4 && < 5, network
     hs-source-dirs:     src
     if os(win32)
         extra-libraries: ws2_32
