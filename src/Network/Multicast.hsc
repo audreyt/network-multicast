@@ -53,9 +53,9 @@ noLoopback     = False
 --
 multicastSender :: HostName -> PortNumber -> IO (Socket, SockAddr)
 multicastSender host port = do
+    addr  <- fmap (SockAddrInet port) (inet_addr host)
     proto <- getProtocolNumber "udp"
     sock  <- socket AF_INET Datagram proto
-    addr  <- fmap (SockAddrInet port) (inet_addr host)
     return (sock, addr)
 
 -- | Calling 'multicastReceiver' creates and binds a UDP socket for listening

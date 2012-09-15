@@ -1,6 +1,6 @@
 name:               network-multicast
-version:            0.0.5
-copyright:          2008 Audrey Tang
+version:            0.0.6
+copyright:          2008-2012 Audrey Tang
 license:            BSD3
 license-file:       LICENSE
 author:             Audrey Tang <audreyt@audreyt.org>
