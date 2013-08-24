@@ -30,6 +30,7 @@ import Foreign.C.Error
 import Foreign.Storable
 import Foreign.Marshal
 import Foreign.Ptr
+import Control.Exception (bracketOnError)
 
 type TimeToLive = Int
 type LoopbackMode = Bool
@@ -72,18 +73,22 @@ multicastSender host port = do
 -- >         print (msg, addr) in loop
 --
 multicastReceiver :: HostName -> PortNumber -> IO Socket
-multicastReceiver host port = do
-    proto <- getProtocolNumber "udp"
-    sock  <- socket AF_INET Datagram proto
-#ifdef SO_REUSEPORT
-    setSocketOption sock ReusePort 1
+multicastReceiver host port = bracketOnError get close setup
+  where
+    get = do
+      proto <- getProtocolNumber "udp"
+      sock  <- socket AF_INET Datagram proto
+#if defined(SO_REUSEPORT) && ! defined (__linux__)
+      setSocketOption sock ReusePort 1
 #else
-    setSocketOption sock ReuseAddr 1
+      setSocketOption sock ReuseAddr 1
+      return sock
 #endif
-    (addrInfo:_) <- getAddrInfo Nothing (Just host) (Just $ show port)
-    bindSocket sock $ addrAddress addrInfo
-    addMembership sock host
-    return sock
+    setup sock = do
+      (addrInfo:_) <- getAddrInfo Nothing (Just host) (Just $ show port)
+      bindSocket sock $ addrAddress addrInfo
+      addMembership sock host
+      return sock
 
 doSetSocketOption :: Storable a => CInt -> Socket -> a -> IO CInt
 doSetSocketOption ip_multicast_option (MkSocket s _ _ _ _) x = alloca $ \ptr -> do
