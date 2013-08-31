@@ -75,15 +75,18 @@ multicastSender host port = do
 multicastReceiver :: HostName -> PortNumber -> IO Socket
 multicastReceiver host port = bracketOnError get close setup
   where
+    get :: IO Socket
     get = do
       proto <- getProtocolNumber "udp"
       sock  <- socket AF_INET Datagram proto
 #if defined(SO_REUSEPORT) && ! defined (__linux__)
       setSocketOption sock ReusePort 1
+      return sock
 #else
       setSocketOption sock ReuseAddr 1
       return sock
 #endif
+    setup :: Socket -> IO Socket
     setup sock = do
       (addrInfo:_) <- getAddrInfo Nothing (Just host) (Just $ show port)
       bindSocket sock $ addrAddress addrInfo
