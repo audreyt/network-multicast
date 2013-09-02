@@ -73,7 +73,7 @@ multicastSender host port = do
 -- >         print (msg, addr) in loop
 --
 multicastReceiver :: HostName -> PortNumber -> IO Socket
-multicastReceiver host port = bracketOnError get close setup
+multicastReceiver host port = bracketOnError get sClose setup
   where
     get :: IO Socket
     get = do
