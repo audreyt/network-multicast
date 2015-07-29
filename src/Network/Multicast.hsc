@@ -89,7 +89,7 @@ multicastReceiver host port = bracketOnError get sClose setup
     setup :: Socket -> IO Socket
     setup sock = do
       (addrInfo:_) <- getAddrInfo Nothing (Just host) (Just $ show port)
-      addMembership sock host
+      addMembership sock host Nothing
       bindSocket sock $ addrAddress addrInfo
       return sock
 
@@ -118,23 +118,26 @@ setInterface sock host = maybeIOError "setInterface" $ do
     doSetSocketOption _IP_MULTICAST_IF sock addr
 
 -- | Make the socket listen on multicast datagrams sent by the specified 'HostName'.
-addMembership :: Socket -> HostName -> IO ()
-addMembership s = maybeIOError "addMembership" . doMulticastGroup _IP_ADD_MEMBERSHIP s
+addMembership :: Socket -> HostName -> Maybe HostName -> IO ()
+addMembership s host = maybeIOError "addMembership" . doMulticastGroup _IP_ADD_MEMBERSHIP s host
 
 -- | Stop the socket from listening on multicast datagrams sent by the specified 'HostName'.
-dropMembership :: Socket -> HostName -> IO ()
-dropMembership s = maybeIOError "dropMembership" . doMulticastGroup _IP_DROP_MEMBERSHIP s
+dropMembership :: Socket -> HostName -> Maybe HostName -> IO ()
+dropMembership s host = maybeIOError "dropMembership" . doMulticastGroup _IP_DROP_MEMBERSHIP s host
 
 maybeIOError :: String -> IO CInt -> IO ()
 maybeIOError name f = f >>= \err -> case err of
     0 -> return ()
     _ -> ioError (errnoToIOError name (Errno (fromIntegral err)) Nothing Nothing)
 
-doMulticastGroup :: CInt -> Socket -> HostName -> IO CInt
-doMulticastGroup flag (MkSocket s _ _ _ _) host = allocaBytes #{size struct ip_mreq} $ \mReqPtr -> do
+doMulticastGroup :: CInt -> Socket -> HostName -> Maybe HostName -> IO CInt
+doMulticastGroup flag (MkSocket s _ _ _ _) host local = allocaBytes #{size struct ip_mreq} $ \mReqPtr -> do
     addr <- inet_addr host
+    iface <- case local of
+        Nothing -> return (#{const INADDR_ANY} `asTypeOf` addr)
+        Just loc -> inet_addr loc
     #{poke struct ip_mreq, imr_multiaddr} mReqPtr addr
-    #{poke struct ip_mreq, imr_interface} mReqPtr (#{const INADDR_ANY} `asTypeOf` addr)
+    #{poke struct ip_mreq, imr_interface} mReqPtr iface
     c_setsockopt s _IPPROTO_IP flag (castPtr mReqPtr) (#{size struct ip_mreq})
 
 #ifdef mingw32_HOST_OS
