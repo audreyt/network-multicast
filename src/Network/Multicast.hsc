@@ -88,9 +88,8 @@ multicastReceiver host port = bracketOnError get sClose setup
 #endif
     setup :: Socket -> IO Socket
     setup sock = do
-      (addrInfo:_) <- getAddrInfo Nothing (Just host) (Just $ show port)
+      bindSocket sock $ SockAddrInet port iNADDR_ANY
       addMembership sock host Nothing
-      bindSocket sock $ addrAddress addrInfo
       return sock
 
 doSetSocketOption :: Storable a => CInt -> Socket -> a -> IO CInt
