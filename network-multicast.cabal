@@ -24,4 +24,4 @@ library
 
 source-repository head
   type:     git
-  location: http://github.com/ocramz/network-multicast
+  location: http://github.com/audreyt/network-multicast
