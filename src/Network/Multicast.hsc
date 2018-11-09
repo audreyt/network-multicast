@@ -20,19 +20,25 @@ module Network.Multicast (
     -- * Additional Socket operations
     , addMembership, dropMembership
     , setLoopbackMode, setTimeToLive, setInterface
+    , ipv6AddMembership, ipv6DropMembership
+    , ipv6SetLoopbackMode, ipv6SetHopLimit, ipv6SetInterface
     -- * Socket options
-    , TimeToLive, LoopbackMode, enableLoopback, noLoopback
+    , HopLimit, TimeToLive, LoopbackMode, enableLoopback, noLoopback
 ) where
+import Data.Maybe
 import Network.BSD
 import Network.Socket
+import Network.Socket.Internal
 import Foreign.C.Types
 import Foreign.C.Error
 import Foreign.Storable
 import Foreign.Marshal
+import Foreign.Marshal.Utils
 import Foreign.Ptr
 import Control.Exception (bracketOnError)
 
 type TimeToLive = Int
+type HopLimit = Int
 type LoopbackMode = Bool
 
 enableLoopback, noLoopback :: LoopbackMode
@@ -54,10 +60,15 @@ noLoopback     = False
 --
 multicastSender :: HostName -> PortNumber -> IO (Socket, SockAddr)
 multicastSender host port = do
-    addr  <- fmap (SockAddrInet port) (inet_addr host)
-    proto <- getProtocolNumber "udp"
-    sock  <- socket AF_INET Datagram proto
-    return (sock, addr)
+    addrInfos <- getAddrInfo Nothing (Just host) Nothing
+    case addrInfos of
+        addrInfo:_ -> do
+            proto <- getProtocolNumber "udp"
+            sock <- socket (addrFamily addrInfo) Datagram proto
+            case addrAddress addrInfo of
+                SockAddrInet _ ha -> return (sock, SockAddrInet port ha)
+                SockAddrInet6 _ fi ha si -> return (sock, SockAddrInet6 port fi ha si)
+        _ -> fail $ "Cannot use hostName " <> host
 
 -- | Calling 'multicastReceiver' creates and binds a UDP socket for listening
 -- multicast datagrams on the specified host and port.
@@ -73,29 +84,43 @@ multicastSender host port = do
 -- >         print (msg, addr) in loop
 --
 multicastReceiver :: HostName -> PortNumber -> IO Socket
-multicastReceiver host port = bracketOnError get sClose setup
-  where
-    get :: IO Socket
-    get = do
-      proto <- getProtocolNumber "udp"
-      sock  <- socket AF_INET Datagram proto
+multicastReceiver host port = do
+    addrInfos <- getAddrInfo Nothing (Just host) Nothing
+    case addrInfos of
+        addrInfo:_ -> bracketOnError get sClose setup
+                      where
+                          get :: IO Socket
+                          get = do
+                            proto <- getProtocolNumber "udp"
+                            sock  <- socket (addrFamily addrInfo) Datagram proto
 #if defined(SO_REUSEPORT) && ! defined (__linux__)
-      setSocketOption sock ReusePort 1
-      return sock
+                            setSocketOption sock ReusePort 1
+                            return sock
 #else
-      setSocketOption sock ReuseAddr 1
-      return sock
+                            setSocketOption sock ReuseAddr 1
+                            return sock
 #endif
-    setup :: Socket -> IO Socket
-    setup sock = do
-      bindSocket sock $ SockAddrInet port iNADDR_ANY
-      addMembership sock host Nothing
-      return sock
+                          setup :: Socket -> IO Socket
+                          setup sock = do
+                            case (addrAddress addrInfo) of
+                                SockAddrInet _ _ -> do
+                                     bindSocket sock $ SockAddrInet port iNADDR_ANY
+                                     addMembership sock host Nothing
+                                SockAddrInet6 _ _ addr _ -> do
+                                     bindSocket sock $ SockAddrInet6 port 0 iN6ADDR_ANY 0
+                                     ipv6AddMembership sock addr Nothing
+                                _ -> fail "Unsupported address family"
+                            return sock
+        _ -> fail $ host <> " cannot be resolved as an address"
 
 doSetSocketOption :: Storable a => CInt -> Socket -> a -> IO CInt
-doSetSocketOption ip_multicast_option (MkSocket s _ _ _ _) x = alloca $ \ptr -> do
+doSetSocketOption ip_multicast_option (MkSocket s AF_INET _ _ _) x = alloca $ \ptr -> do
     poke ptr x
     c_setsockopt s _IPPROTO_IP ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
+
+doSetSocketOption ip_multicast_option (MkSocket s AF_INET6 _ _ _) x = alloca $ \ptr -> do
+    poke ptr x
+    c_setsockopt s _IPPROTO_IPV6 ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
 
 -- | Enable or disable the loopback mode on a socket created by 'multicastSender'.
 -- Loopback is enabled by default; disabling it may improve performance a little bit.
@@ -124,6 +149,34 @@ addMembership s host = maybeIOError "addMembership" . doMulticastGroup _IP_ADD_M
 dropMembership :: Socket -> HostName -> Maybe HostName -> IO ()
 dropMembership s host = maybeIOError "dropMembership" . doMulticastGroup _IP_DROP_MEMBERSHIP s host
 
+-- | Make the socket listen on multicast datagrams sent by the specified 'HostName'.
+ipv6AddMembership :: Socket -> HostAddress6 -> Maybe Int -> IO ()
+ipv6AddMembership s iface = maybeIOError "ipv6AddMembership" . doMulticastGroup6 _IPV6_ADD_MEMBERSHIP s iface
+
+-- | Stop the socket from listening on multicast datagrams sent by the specified 'HostName'.
+ipv6DropMembership :: Socket -> HostAddress6 -> Maybe Int -> IO ()
+ipv6DropMembership s iface = maybeIOError "ipv6DropMembership" . doMulticastGroup6 _IPV6_DROP_MEMBERSHIP s iface
+
+-- | Enable or disable the loopback mode on a socket created by 'multicastSender'.
+-- Loopback is enabled by default; disabling it may improve performance a little bit.
+ipv6SetLoopbackMode :: Socket -> LoopbackMode -> IO ()
+ipv6SetLoopbackMode sock mode = maybeIOError "ipv6SetLoopbackMode" $ do
+    let loop = if mode then 1 else 0 :: CUInt
+    doSetSocketOption _IPV6_MULTICAST_LOOP sock loop
+
+-- | Set the outgoing interface when sending ipv6 multicast datagrams
+-- The interface intex can be found from ifNameToIndex (network >= 2.7) or a call to if_nametoindex(3).
+ipv6SetInterface :: Socket -> Int -> IO ()
+ipv6SetInterface sock iface = maybeIOError "ipv6SetInterface" $ do
+    let ifidx = toEnum iface :: CInt
+    doSetSocketOption _IPV6_MULTICAST_IF sock ifidx
+
+-- | Set the Hop limit of the multicast.
+ipv6SetHopLimit :: Socket -> Int -> IO ()
+ipv6SetHopLimit sock ttl = maybeIOError "ipv6SetHopLimit" $ do
+    let val = toEnum ttl :: CInt
+    doSetSocketOption _IPV6_MULTICAST_HOPS sock val
+
 maybeIOError :: String -> IO CInt -> IO ()
 maybeIOError name f = f >>= \err -> case err of
     0 -> return ()
@@ -139,30 +192,17 @@ doMulticastGroup flag (MkSocket s _ _ _ _) host local = allocaBytes #{size struc
     #{poke struct ip_mreq, imr_interface} mReqPtr iface
     c_setsockopt s _IPPROTO_IP flag (castPtr mReqPtr) (#{size struct ip_mreq})
 
-#ifdef mingw32_HOST_OS
-foreign import stdcall unsafe "setsockopt"
-    c_setsockopt :: CInt -> CInt -> CInt -> Ptr CInt -> CInt -> IO CInt
-
-foreign import stdcall unsafe "WSAGetLastError"
-    wsaGetLastError :: IO CInt
-
-getLastError :: CInt -> IO CInt
-getLastError = const wsaGetLastError
-
-_IP_MULTICAST_IF, _IP_MULTICAST_TTL, _IP_MULTICAST_LOOP, _IP_ADD_MEMBERSHIP, _IP_DROP_MEMBERSHIP :: CInt
-_IP_MULTICAST_IF    = 9
-_IP_MULTICAST_TTL   = 10
-_IP_MULTICAST_LOOP  = 11
-_IP_ADD_MEMBERSHIP  = 12
-_IP_DROP_MEMBERSHIP = 13
-
-#else
+doMulticastGroup6 :: CInt -> Socket -> HostAddress6 -> Maybe Int -> IO CInt
+doMulticastGroup6 flag (MkSocket s _ _ _ _) addr iface = allocaBytes #{size struct ipv6_mreq} $ \mReqPtr -> do
+    withSockAddr (SockAddrInet6 0 0 addr 0) $ \saddr _ -> do
+        copyBytes (#{ptr struct ipv6_mreq, ipv6mr_multiaddr} mReqPtr)
+                  (#{ptr struct sockaddr_in6, sin6_addr} saddr)
+                  #{size struct in6_addr}
+    #{poke struct ipv6_mreq, ipv6mr_interface} mReqPtr (fromMaybe (CUInt 0) (toEnum <$> iface))
+    c_setsockopt s _IPPROTO_IPV6 flag (castPtr mReqPtr) (#{size struct ipv6_mreq})
 
 foreign import ccall unsafe "setsockopt"
     c_setsockopt :: CInt -> CInt -> CInt -> Ptr CInt -> CInt -> IO CInt
-
-getLastError :: CInt -> IO CInt
-getLastError = return
 
 _IP_MULTICAST_IF, _IP_MULTICAST_TTL, _IP_MULTICAST_LOOP, _IP_ADD_MEMBERSHIP, _IP_DROP_MEMBERSHIP :: CInt
 _IP_MULTICAST_IF    = #const IP_MULTICAST_IF
@@ -171,7 +211,15 @@ _IP_MULTICAST_LOOP  = #const IP_MULTICAST_LOOP
 _IP_ADD_MEMBERSHIP  = #const IP_ADD_MEMBERSHIP
 _IP_DROP_MEMBERSHIP = #const IP_DROP_MEMBERSHIP
 
-#endif
+_IPV6_MULTICAST_IF, _IPV6_MULTICAST_HOPS, _IPV6_MULTICAST_LOOP, _IPV6_ADD_MEMBERSHIP, _IPV6_DROP_MEMBERSHIP :: CInt
+_IPV6_MULTICAST_IF    = #const IPV6_MULTICAST_IF
+_IPV6_MULTICAST_HOPS  = #const IPV6_MULTICAST_HOPS
+_IPV6_MULTICAST_LOOP  = #const IPV6_MULTICAST_LOOP
+_IPV6_ADD_MEMBERSHIP  = #const IPV6_ADD_MEMBERSHIP
+_IPV6_DROP_MEMBERSHIP = #const IPV6_DROP_MEMBERSHIP
 
 _IPPROTO_IP :: CInt
 _IPPROTO_IP = #const IPPROTO_IP
+
+_IPPROTO_IPV6 :: CInt
+_IPPROTO_IPV6 = #const IPPROTO_IPV6
