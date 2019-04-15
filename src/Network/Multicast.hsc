@@ -31,6 +31,7 @@ import Foreign.Storable
 import Foreign.Marshal
 import Foreign.Ptr
 import Control.Exception (bracketOnError)
+import Data.Word (Word32)
 
 type TimeToLive = Int
 type LoopbackMode = Bool
@@ -38,6 +39,9 @@ type LoopbackMode = Bool
 enableLoopback, noLoopback :: LoopbackMode
 enableLoopback = True
 noLoopback     = False
+
+inet_addr :: HostName -> IO HostAddress
+inet_addr = fmap hostAddress . getHostByName
 
 -- | Calling 'multicastSender' creates a client side UDP socket for sending
 -- multicast datagrams to the specified host and port.
@@ -73,7 +77,7 @@ multicastSender host port = do
 -- >         print (msg, addr) in loop
 --
 multicastReceiver :: HostName -> PortNumber -> IO Socket
-multicastReceiver host port = bracketOnError get sClose setup
+multicastReceiver host port = bracketOnError get close setup
   where
     get :: IO Socket
     get = do
@@ -88,14 +92,22 @@ multicastReceiver host port = bracketOnError get sClose setup
 #endif
     setup :: Socket -> IO Socket
     setup sock = do
-      bindSocket sock $ SockAddrInet port iNADDR_ANY
+      bind sock $ SockAddrInet port iNADDR_ANY
       addMembership sock host Nothing
       return sock
 
+iNADDR_ANY :: HostAddress
+iNADDR_ANY = htonl 0
+
+-- | Converts the from host byte order to network byte order.
+foreign import ccall unsafe "htonl" htonl :: Word32 -> Word32
+
+
 doSetSocketOption :: Storable a => CInt -> Socket -> a -> IO CInt
-doSetSocketOption ip_multicast_option (MkSocket s _ _ _ _) x = alloca $ \ptr -> do
+doSetSocketOption ip_multicast_option sock x = alloca $ \ptr -> do
     poke ptr x
-    c_setsockopt s _IPPROTO_IP ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
+    fd <- fdSocket sock
+    c_setsockopt fd _IPPROTO_IP ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
 
 -- | Enable or disable the loopback mode on a socket created by 'multicastSender'.
 -- Loopback is enabled by default; disabling it may improve performance a little bit.
@@ -130,14 +142,15 @@ maybeIOError name f = f >>= \err -> case err of
     _ -> ioError (errnoToIOError name (Errno (fromIntegral err)) Nothing Nothing)
 
 doMulticastGroup :: CInt -> Socket -> HostName -> Maybe HostName -> IO CInt
-doMulticastGroup flag (MkSocket s _ _ _ _) host local = allocaBytes #{size struct ip_mreq} $ \mReqPtr -> do
+doMulticastGroup flag sock host local = allocaBytes #{size struct ip_mreq} $ \mReqPtr -> do
     addr <- inet_addr host
     iface <- case local of
         Nothing -> return (#{const INADDR_ANY} `asTypeOf` addr)
         Just loc -> inet_addr loc
     #{poke struct ip_mreq, imr_multiaddr} mReqPtr addr
     #{poke struct ip_mreq, imr_interface} mReqPtr iface
-    c_setsockopt s _IPPROTO_IP flag (castPtr mReqPtr) (#{size struct ip_mreq})
+    fd <- fdSocket sock
+    c_setsockopt fd _IPPROTO_IP flag (castPtr mReqPtr) (#{size struct ip_mreq})
 
 #ifdef mingw32_HOST_OS
 foreign import stdcall unsafe "setsockopt"
@@ -175,3 +188,4 @@ _IP_DROP_MEMBERSHIP = #const IP_DROP_MEMBERSHIP
 
 _IPPROTO_IP :: CInt
 _IPPROTO_IP = #const IPPROTO_IP
+
