@@ -12,7 +12,7 @@ stability:          experimental
 build-type:         Simple
 category:           Network
 cabal-version:      >= 1.6
-extra-source-files: examples/sender.hs examples/receiver.hs
+extra-source-files: examples/sender.hs examples/receiver.hs ChangeLog
 
 library
     extensions:         ForeignFunctionInterface, CPP
