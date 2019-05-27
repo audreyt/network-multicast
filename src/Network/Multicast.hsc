@@ -36,6 +36,7 @@ import Foreign.Marshal
 import Foreign.Marshal.Utils
 import Foreign.Ptr
 import Control.Exception (bracketOnError)
+import Data.Word (Word32)
 
 type TimeToLive = Int
 type HopLimit = Int
@@ -44,6 +45,9 @@ type LoopbackMode = Bool
 enableLoopback, noLoopback :: LoopbackMode
 enableLoopback = True
 noLoopback     = False
+
+inet_addr :: HostName -> IO HostAddress
+inet_addr = fmap hostAddress . getHostByName
 
 -- | Calling 'multicastSender' creates a client side UDP socket for sending
 -- multicast datagrams to the specified host and port.
@@ -87,7 +91,7 @@ multicastReceiver :: HostName -> PortNumber -> IO Socket
 multicastReceiver host port = do
     addrInfos <- getAddrInfo Nothing (Just host) Nothing
     case addrInfos of
-        addrInfo:_ -> bracketOnError get sClose setup
+        addrInfo:_ -> bracketOnError get close setup
                       where
                           get :: IO Socket
                           get = do
@@ -104,19 +108,27 @@ multicastReceiver host port = do
                           setup sock = do
                             case (addrAddress addrInfo) of
                                 SockAddrInet _ _ -> do
-                                     bindSocket sock $ SockAddrInet port iNADDR_ANY
+                                     bind sock $ SockAddrInet port iNADDR_ANY
                                      addMembership sock host Nothing
                                 SockAddrInet6 _ _ addr _ -> do
-                                     bindSocket sock $ SockAddrInet6 port 0 iN6ADDR_ANY 0
+                                     bind sock $ SockAddrInet6 port 0 iN6ADDR_ANY 0
                                      ipv6AddMembership sock addr Nothing
                                 _ -> fail "Unsupported address family"
                             return sock
         _ -> fail $ host <> " cannot be resolved as an address"
 
+iNADDR_ANY :: HostAddress
+iNADDR_ANY = htonl 0
+
+-- | Converts the from host byte order to network byte order.
+foreign import ccall unsafe "htonl" htonl :: Word32 -> Word32
+
+
 doSetSocketOption :: Storable a => CInt -> Socket -> a -> IO CInt
-doSetSocketOption ip_multicast_option (MkSocket s AF_INET _ _ _) x = alloca $ \ptr -> do
+doSetSocketOption ip_multicast_option sock x = alloca $ \ptr -> do
     poke ptr x
-    c_setsockopt s _IPPROTO_IP ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
+    fd <- fdSocket sock
+    c_setsockopt fd _IPPROTO_IP ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
 
 doSetSocketOption ip_multicast_option (MkSocket s AF_INET6 _ _ _) x = alloca $ \ptr -> do
     poke ptr x
@@ -183,14 +195,15 @@ maybeIOError name f = f >>= \err -> case err of
     _ -> ioError (errnoToIOError name (Errno (fromIntegral err)) Nothing Nothing)
 
 doMulticastGroup :: CInt -> Socket -> HostName -> Maybe HostName -> IO CInt
-doMulticastGroup flag (MkSocket s _ _ _ _) host local = allocaBytes #{size struct ip_mreq} $ \mReqPtr -> do
+doMulticastGroup flag sock host local = allocaBytes #{size struct ip_mreq} $ \mReqPtr -> do
     addr <- inet_addr host
     iface <- case local of
         Nothing -> return (#{const INADDR_ANY} `asTypeOf` addr)
         Just loc -> inet_addr loc
     #{poke struct ip_mreq, imr_multiaddr} mReqPtr addr
     #{poke struct ip_mreq, imr_interface} mReqPtr iface
-    c_setsockopt s _IPPROTO_IP flag (castPtr mReqPtr) (#{size struct ip_mreq})
+    fd <- fdSocket sock
+    c_setsockopt fd _IPPROTO_IP flag (castPtr mReqPtr) (#{size struct ip_mreq})
 
 doMulticastGroup6 :: CInt -> Socket -> HostAddress6 -> Maybe Int -> IO CInt
 doMulticastGroup6 flag (MkSocket s _ _ _ _) addr iface = allocaBytes #{size struct ipv6_mreq} $ \mReqPtr -> do
