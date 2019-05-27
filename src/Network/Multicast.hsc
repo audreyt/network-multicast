@@ -120,6 +120,9 @@ multicastReceiver host port = do
 iNADDR_ANY :: HostAddress
 iNADDR_ANY = htonl 0
 
+iN6ADDR_ANY :: HostAddress6
+iN6ADDR_ANY = (0,0,0,0)
+
 -- | Converts the from host byte order to network byte order.
 foreign import ccall unsafe "htonl" htonl :: Word32 -> Word32
 
@@ -130,9 +133,11 @@ doSetSocketOption ip_multicast_option sock x = alloca $ \ptr -> do
     fd <- fdSocket sock
     c_setsockopt fd _IPPROTO_IP ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
 
-doSetSocketOption ip_multicast_option (MkSocket s AF_INET6 _ _ _) x = alloca $ \ptr -> do
+doSetSocketOption6 :: Storable a => CInt -> Socket -> a -> IO CInt
+doSetSocketOption6 ip_multicast_option sock x = alloca $ \ptr -> do
     poke ptr x
-    c_setsockopt s _IPPROTO_IPV6 ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
+    fd <- fdSocket sock
+    c_setsockopt fd _IPPROTO_IPV6 ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
 
 -- | Enable or disable the loopback mode on a socket created by 'multicastSender'.
 -- Loopback is enabled by default; disabling it may improve performance a little bit.
@@ -206,13 +211,14 @@ doMulticastGroup flag sock host local = allocaBytes #{size struct ip_mreq} $ \mR
     c_setsockopt fd _IPPROTO_IP flag (castPtr mReqPtr) (#{size struct ip_mreq})
 
 doMulticastGroup6 :: CInt -> Socket -> HostAddress6 -> Maybe Int -> IO CInt
-doMulticastGroup6 flag (MkSocket s _ _ _ _) addr iface = allocaBytes #{size struct ipv6_mreq} $ \mReqPtr -> do
+doMulticastGroup6 flag sock addr iface = allocaBytes #{size struct ipv6_mreq} $ \mReqPtr -> do
     withSockAddr (SockAddrInet6 0 0 addr 0) $ \saddr _ -> do
         copyBytes (#{ptr struct ipv6_mreq, ipv6mr_multiaddr} mReqPtr)
                   (#{ptr struct sockaddr_in6, sin6_addr} saddr)
                   #{size struct in6_addr}
     #{poke struct ipv6_mreq, ipv6mr_interface} mReqPtr (fromMaybe (CUInt 0) (toEnum <$> iface))
-    c_setsockopt s _IPPROTO_IPV6 flag (castPtr mReqPtr) (#{size struct ipv6_mreq})
+    fd <- fdSocket sock
+    c_setsockopt fd _IPPROTO_IPV6 flag (castPtr mReqPtr) (#{size struct ipv6_mreq})
 
 foreign import ccall unsafe "setsockopt"
     c_setsockopt :: CInt -> CInt -> CInt -> Ptr CInt -> CInt -> IO CInt
@@ -236,3 +242,8 @@ _IPPROTO_IP = #const IPPROTO_IP
 
 _IPPROTO_IPV6 :: CInt
 _IPPROTO_IPV6 = #const IPPROTO_IPV6
+
+#ifndef IPV6_ADD_MEMBERSHIP
+#define IPV6_ADD_MEMBERSHIP IPV6_JOIN_GROUP
+#define IPV6_DROP_MEMBERSHIP    IPV6_LEAVE_GROUP
+#endif
