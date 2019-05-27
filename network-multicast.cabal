@@ -1,6 +1,6 @@
 name:               network-multicast
-version:            0.2.0
-copyright:          2008-2016 Audrey Tang
+version:            0.3.0
+copyright:          2008-2019 Audrey Tang
 license:            PublicDomain
 license-file:       LICENSE
 author:             Audrey Tang <audreyt@audreyt.org>
