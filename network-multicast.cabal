@@ -1,5 +1,5 @@
 name:               network-multicast
-version:            0.3.1
+version:            0.3.2
 copyright:          2008-2019 Audrey Tang
 license:            PublicDomain
 license-file:       LICENSE
@@ -15,7 +15,7 @@ cabal-version:      >= 1.6
 extra-source-files: examples/sender.hs examples/receiver.hs ChangeLog
 
 library
-    extensions:         ForeignFunctionInterface, CPP
+    extensions:         ForeignFunctionInterface, CPP, FlexibleInstances
     exposed-modules:    Network.Multicast
     build-depends:      base >= 4 && < 5, network, network-bsd
     hs-source-dirs:     src

@@ -102,11 +102,14 @@ iNADDR_ANY = Network.Multicast.htonl 0
 -- | Converts the from host byte order to network byte order.
 foreign import ccall unsafe "htonl" htonl :: Word32 -> Word32
 
+class IOCompat f where ioCompat :: f -> (Socket -> IO CInt)
+instance IOCompat (Socket -> IO CInt) where ioCompat = id
+instance IOCompat (Socket -> CInt) where ioCompat = (return .)
 
 doSetSocketOption :: Storable a => CInt -> Socket -> a -> IO CInt
 doSetSocketOption ip_multicast_option sock x = alloca $ \ptr -> do
     poke ptr x
-    fd <- fdSocket sock
+    fd <- (ioCompat fdSocket) sock
     c_setsockopt fd _IPPROTO_IP ip_multicast_option (castPtr ptr) (toEnum $ sizeOf x)
 
 -- | Enable or disable the loopback mode on a socket created by 'multicastSender'.
@@ -149,7 +152,7 @@ doMulticastGroup flag sock host local = allocaBytes #{size struct ip_mreq} $ \mR
         Just loc -> Network.Multicast.inet_addr loc
     #{poke struct ip_mreq, imr_multiaddr} mReqPtr addr
     #{poke struct ip_mreq, imr_interface} mReqPtr iface
-    fd <- fdSocket sock
+    fd <- (ioCompat fdSocket) sock
     c_setsockopt fd _IPPROTO_IP flag (castPtr mReqPtr) (#{size struct ip_mreq})
 
 #ifdef mingw32_HOST_OS
