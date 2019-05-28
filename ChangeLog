@@ -1,4 +1,6 @@
-# 0.3.0
+# 0.3.1
+- Fix [build errors](https://github.com/commercialhaskell/stackage/issues/4589)
 
+# 0.3.0
 - Fix compatibility with network-3.0
 

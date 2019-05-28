@@ -58,7 +58,7 @@ inet_addr = fmap hostAddress . getHostByName
 --
 multicastSender :: HostName -> PortNumber -> IO (Socket, SockAddr)
 multicastSender host port = do
-    addr  <- fmap (SockAddrInet port) (inet_addr host)
+    addr  <- fmap (SockAddrInet port) (Network.Multicast.inet_addr host)
     proto <- getProtocolNumber "udp"
     sock  <- socket AF_INET Datagram proto
     return (sock, addr)
@@ -92,12 +92,12 @@ multicastReceiver host port = bracketOnError get close setup
 #endif
     setup :: Socket -> IO Socket
     setup sock = do
-      bind sock $ SockAddrInet port iNADDR_ANY
+      bind sock $ SockAddrInet port Network.Multicast.iNADDR_ANY
       addMembership sock host Nothing
       return sock
 
 iNADDR_ANY :: HostAddress
-iNADDR_ANY = htonl 0
+iNADDR_ANY = Network.Multicast.htonl 0
 
 -- | Converts the from host byte order to network byte order.
 foreign import ccall unsafe "htonl" htonl :: Word32 -> Word32
@@ -125,7 +125,7 @@ setTimeToLive sock ttl = maybeIOError "setTimeToLive" $ do
 -- | Set the outgoing interface address of the multicast.
 setInterface :: Socket -> HostName -> IO ()
 setInterface sock host = maybeIOError "setInterface" $ do
-    addr <- inet_addr host
+    addr <- Network.Multicast.inet_addr host
     doSetSocketOption _IP_MULTICAST_IF sock addr
 
 -- | Make the socket listen on multicast datagrams sent by the specified 'HostName'.
@@ -143,10 +143,10 @@ maybeIOError name f = f >>= \err -> case err of
 
 doMulticastGroup :: CInt -> Socket -> HostName -> Maybe HostName -> IO CInt
 doMulticastGroup flag sock host local = allocaBytes #{size struct ip_mreq} $ \mReqPtr -> do
-    addr <- inet_addr host
+    addr <- Network.Multicast.inet_addr host
     iface <- case local of
         Nothing -> return (#{const INADDR_ANY} `asTypeOf` addr)
-        Just loc -> inet_addr loc
+        Just loc -> Network.Multicast.inet_addr loc
     #{poke struct ip_mreq, imr_multiaddr} mReqPtr addr
     #{poke struct ip_mreq, imr_interface} mReqPtr iface
     fd <- fdSocket sock
