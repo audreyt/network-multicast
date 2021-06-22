@@ -11,7 +11,7 @@ description:        The "Network.Multicast" module is for sending
 stability:          experimental
 build-type:         Simple
 category:           Network
-cabal-version:      >= 1.6
+cabal-version:      >= 1.8
 extra-source-files: examples/sender.hs examples/receiver.hs ChangeLog
 
 library
