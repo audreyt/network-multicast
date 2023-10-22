@@ -5,14 +5,13 @@ import Network.Multicast
 
 import Data.Time.Clock (getCurrentTime)
 import Control.Concurrent (threadDelay)
+import Control.Monad (forever)
 
 main :: IO ()
 main = withSocketsDo $ do
     (sock, addr) <- multicastSender "224.0.0.99" 9999
-    let loop = do
+    forever $ do
         msg <- fmap show getCurrentTime
         sendTo sock (C.pack msg) addr
         putStrLn $ "Send [" ++ show addr ++ "]: " ++ msg
-        threadDelay 100000
-        loop
-    loop
+        threadDelay 1000000

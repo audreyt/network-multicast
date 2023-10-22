@@ -1,0 +1,4 @@
+packages: .
+
+package network-multicast
+  flags: +examples
